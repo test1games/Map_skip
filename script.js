@@ -50,224 +50,88 @@ const stateMap = {
     WV: "west-virginia",
     WI: "wisconsin",
     WY: "wyoming"
-  };
-  
+};
 
 async function loadCities() {
   const res = await fetch('./public/skipCities.json');
   skipCities = await res.json();
 }
 
-function parseAddress(address) {
-  // 移除多余的空格和特殊字符，并标准化分隔符
-  address = address
-    .replace(/\s+/g, ' ')  // 将多个空格替换为单个空格
-    .replace(/，/g, ',')   // 将中文逗号替换为英文逗号
-    .replace(/\./g, '.')   // 确保点号是英文点号
-    .trim();
+async function parseAddress(address) {
+  return new Promise((resolve, reject) => {
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ address: address, componentRestrictions: { country: 'US' } }, (results, status) => {
+      if (status === 'OK' && results[0]) {
+        const components = results[0].address_components;
+        let street = '', city = '', state = '', zipCode = '';
 
-  // 格式1: 街道地址. 城市名.州缩写 邮编
-  const format1 = /^(.*)\.\s*([^\.]+)\.([A-Z]{2})\s*(\d{5})$/;
-  // 格式2: 街道地址, 城市名, 州缩写 邮编
-  const format2 = /^(.*),\s*([^,]+),\s*([A-Z]{2})\s*(\d{5})$/;
-  // 格式3: 街道地址, 城市名, 州缩写, 邮编
-  const format3 = /^(.*),\s*([^,]+),\s*([A-Z]{2}),\s*(\d{5})$/;
-  // 格式4: 街道地址 城市名, 州缩写 邮编
-  const format4 = /^(.*)\s+([^,]+),\s*([A-Z]{2})\s*(\d{5})$/;
-  // 格式5: 街道地址 城市名 州缩写 邮编
-  const format5 = /^(.*)\s+([^,]+)\s+([A-Z]{2})\s*(\d{5})$/;
-  // 格式6: 街道地址, 城市名, 州名 邮编
-  const format6 = /^(.*),\s*([^,]+),\s*([A-Za-z\s]+)\s*(\d{5})$/;
-  // 格式7: 街道地址 城市名 州名 邮编
-  const format7 = /^(.*)\s+([^,]+)\s+([A-Za-z\s]+)\s*(\d{5})$/;
-  // 格式8: 街道地址, 城市名, 州缩写
-  const format8 = /^(.*),\s*([^,]+),\s*([A-Z]{2})$/;
-  // 格式9: 街道地址 城市名, 州缩写
-  const format9 = /^(.*)\s+([^,]+),\s*([A-Z]{2})$/;
-  // 格式10: 街道地址, 城市名, 州缩写 邮编（带连字符）
-  const format10 = /^(.*),\s*([^,]+),\s*([A-Z]{2})\s*(\d{5})$/;
-  // 格式11: 街道地址 城市名, 州缩写 邮编（带连字符）
-  const format11 = /^(.*)\s+([^,]+),\s*([A-Z]{2})\s*(\d{5})$/;
-  
-  let match = address.match(format1);
-  if (!match) match = address.match(format2);
-  if (!match) match = address.match(format3);
-  if (!match) match = address.match(format4);
-  if (!match) match = address.match(format5);
-  if (!match) match = address.match(format6);
-  if (!match) match = address.match(format7);
-  if (!match) match = address.match(format8);
-  if (!match) match = address.match(format9);
-  if (!match) match = address.match(format10);
-  if (!match) match = address.match(format11);
-  
-  if (!match) {
-    // 尝试更宽松的匹配
-    const looseMatch = address.match(/^(.*?)(?:,|\s+)([^,]+?)(?:,|\s+)([A-Z]{2})(?:\s+(\d{5}))?$/);
-    if (looseMatch) {
-      return {
-        street: looseMatch[1].trim(),
-        city: looseMatch[2].trim(),
-        stateAbbr: looseMatch[3].trim(),
-        zipCode: looseMatch[4] ? looseMatch[4].trim() : ''
-      };
-    }
-    return null;
-  }
+        for (const component of components) {
+          const types = component.types;
+          if (types.includes('street_number') || types.includes('route')) {
+            street = street ? `${street} ${component.long_name}` : component.long_name;
+          } else if (types.includes('locality') || types.includes('sublocality')) {
+            city = component.long_name;
+          } else if (types.includes('administrative_area_level_1')) {
+            state = component.short_name;
+          } else if (types.includes('postal_code')) {
+            zipCode = component.long_name;
+          }
+        }
 
-  let stateAbbr = match[3].trim();
-  
-  // 如果匹配到的是州名而不是缩写，转换为缩写
-  if (stateAbbr.length > 2) {
-    const stateName = stateAbbr.toLowerCase().replace(/\s+/g, '-');
-    for (const [abbr, name] of Object.entries(stateMap)) {
-      if (name === stateName) {
-        stateAbbr = abbr;
-        break;
+        if (!state) {
+          reject(new Error('无法识别州信息'));
+          return;
+        }
+
+        resolve({
+          street: street,
+          city: city,
+          stateAbbr: state,
+          zipCode: zipCode,
+          fullAddress: results[0].formatted_address,
+          location: results[0].geometry.location
+        });
+      } else {
+        reject(new Error('无法解析地址'));
       }
-    }
-  }
-
-  return {
-    street: match[1].trim(),
-    city: match[2].trim(),
-    stateAbbr: stateAbbr,
-    zipCode: match[4] ? match[4].trim() : ''
-  };
+    });
+  });
 }
 
-// API Keys
-const API_KEYS = {
-  azure: 'KklG7KuZg9Akt5vhR0iMpjhwX3lyVIotTkXxywpFWyY1XQLnSq8pJQQJ99BDACYeBjFh5AQjAAAgAZMP2wiM',
-  google: 'AIzaSyBu6JMRZmgjWhsNRGZAI_octgA9jCF6HOg'
-};
-
-// 获取当前选中的API
-function getCurrentApi() {
-  return document.getElementById('api-select').value;
-}
-
-// 获取API密钥
-function getApiKey() {
-  return API_KEYS[getCurrentApi()];
-}
-
-// 使用Google Maps API获取坐标
-async function getCoordinatesGoogle(address) {
-  const key = getApiKey();
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${key}`;
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    if (data.status !== 'OK' || !data.results || data.results.length === 0) {
-      console.error('API Response:', data);
-      throw new Error('无法获取坐标信息');
-    }
-    const location = data.results[0].geometry.location;
-    return [location.lng, location.lat];
-  } catch (error) {
-    console.error('获取坐标时出错:', error);
-    console.error('API URL:', url);
-    throw error;
-  }
-}
-
-// 使用Google Maps API获取驾车时间
-async function getDrivingTimeGoogle(origin, destination) {
-  const key = getApiKey();
-  const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin[1]},${origin[0]}&destinations=${destination[1]},${destination[0]}&mode=driving&key=${key}`;
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    if (data.status !== 'OK' || !data.rows || data.rows.length === 0) {
-      console.error('API Response:', data);
-      throw new Error('无法获取驾车时间');
-    }
-    const element = data.rows[0].elements[0];
-    if (element.status !== 'OK') {
-      throw new Error('无法获取驾车时间');
-    }
-    return {
-      duration: element.duration.value,
-      distance: element.distance.value
-    };
-  } catch (error) {
-    console.error('获取驾车时间时出错:', error);
-    console.error('API URL:', url);
-    throw error;
-  }
-}
-
-// 修改现有的getCoordinates和getDrivingTime函数
 async function getCoordinates(address) {
-  const api = getCurrentApi();
-  if (api === 'google') {
-    return getCoordinatesGoogle(address);
-  } else {
-    return getCoordinatesAzure(address);
-  }
+  return new Promise((resolve, reject) => {
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ address: address }, (results, status) => {
+      if (status === 'OK' && results[0]) {
+        const location = results[0].geometry.location;
+        resolve([location.lng(), location.lat()]);
+      } else {
+        reject(new Error('无法获取坐标信息'));
+      }
+    });
+  });
 }
 
 async function getDrivingTime(origin, destination) {
-  const api = getCurrentApi();
-  if (api === 'google') {
-    return getDrivingTimeGoogle(origin, destination);
-  } else {
-    return getDrivingTimeAzure(origin, destination);
-  }
-}
-
-// 重命名原有的Azure函数
-async function getCoordinatesAzure(address) {
-  const key = getApiKey();
-  const url = `https://atlas.microsoft.com/search/address/json?api-version=1.0&subscription-key=${key}&query=${encodeURIComponent(address)}&limit=1`;
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    if (!data.results || data.results.length === 0) {
-      console.error('API Response:', data);
-      throw new Error('无法获取坐标信息');
-    }
-    const position = data.results[0].position;
-    return [position.lon, position.lat];
-  } catch (error) {
-    console.error('获取坐标时出错:', error);
-    console.error('API URL:', url);
-    throw error;
-  }
-}
-
-async function getDrivingTimeAzure(origin, destination) {
-  const key = getApiKey();
-  const url = `https://atlas.microsoft.com/route/directions/json?api-version=1.0&subscription-key=${key}&query=${origin[1]},${origin[0]}:${destination[1]},${destination[0]}&travelMode=car&computeBestOrder=false`;
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    if (!data.routes || data.routes.length === 0) {
-      console.error('API Response:', data);
-      throw new Error('无法获取驾车时间');
-    }
-    return {
-      duration: data.routes[0].summary.travelTimeInSeconds,
-      distance: data.routes[0].summary.lengthInMeters
-    };
-  } catch (error) {
-    console.error('获取驾车时间时出错:', error);
-    console.error('API URL:', url);
-    throw error;
-  }
+  return new Promise((resolve, reject) => {
+    const service = new google.maps.DistanceMatrixService();
+    service.getDistanceMatrix({
+      origins: [{ lat: origin[1], lng: origin[0] }],
+      destinations: [{ lat: destination[1], lng: destination[0] }],
+      travelMode: google.maps.TravelMode.DRIVING,
+      unitSystem: google.maps.UnitSystem.IMPERIAL
+    }, (response, status) => {
+      if (status === 'OK' && response.rows[0].elements[0].status === 'OK') {
+        const element = response.rows[0].elements[0];
+        resolve({
+          duration: element.duration.value,
+          distance: element.distance.value
+        });
+      } else {
+        reject(new Error('无法获取驾车时间'));
+      }
+    });
+  });
 }
 
 function formatDistance(meters) {
@@ -283,16 +147,16 @@ function formatDuration(seconds) {
 document.getElementById('calculate-btn').onclick = async () => {
   try {
     const addressInput = document.getElementById('store-address').value.trim();
-    const parsed = parseAddress(addressInput);
+    const parsed = await parseAddress(addressInput);
     
     if (!parsed) {
-      alert('地址格式不正确，请重新输入。');
+      alert('地址解析失败，请检查地址格式。');
       return;
     }
 
     const stateFull = stateMap[parsed.stateAbbr];
     if (!stateFull || !skipCities[stateFull]) {
-      alert('未找到对应州，请检查或联系管理员。');
+      alert(`未找到 ${parsed.stateAbbr} 州的城市数据，请联系管理员。`);
       return;
     }
 
@@ -300,7 +164,7 @@ document.getElementById('calculate-btn').onclick = async () => {
     const resultList = document.getElementById('result-list');
     resultList.innerHTML = '<li class="loading">正在加载店铺坐标...</li>';
 
-    const storeCoords = await getCoordinates(addressInput);
+    const storeCoords = [parsed.location.lng(), parsed.location.lat()];
     resultList.innerHTML = '<li class="loading">店铺坐标已加载，开始并行计算城市距离...</li>';
 
     const cities = skipCities[stateFull];
