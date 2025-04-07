@@ -136,8 +136,96 @@ function parseAddress(address) {
   };
 }
 
+// API Keys
+const API_KEYS = {
+  azure: 'KklG7KuZg9Akt5vhR0iMpjhwX3lyVIotTkXxywpFWyY1XQLnSq8pJQQJ99BDACYeBjFh5AQjAAAgAZMP2wiM',
+  google: 'AIzaSyBu6JMRZmgjWhsNRGZAI_octgA9jCF6HOg'
+};
+
+// 获取当前选中的API
+function getCurrentApi() {
+  return document.getElementById('api-select').value;
+}
+
+// 获取API密钥
+function getApiKey() {
+  return API_KEYS[getCurrentApi()];
+}
+
+// 使用Google Maps API获取坐标
+async function getCoordinatesGoogle(address) {
+  const key = getApiKey();
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${key}`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    if (data.status !== 'OK' || !data.results || data.results.length === 0) {
+      console.error('API Response:', data);
+      throw new Error('无法获取坐标信息');
+    }
+    const location = data.results[0].geometry.location;
+    return [location.lng, location.lat];
+  } catch (error) {
+    console.error('获取坐标时出错:', error);
+    console.error('API URL:', url);
+    throw error;
+  }
+}
+
+// 使用Google Maps API获取驾车时间
+async function getDrivingTimeGoogle(origin, destination) {
+  const key = getApiKey();
+  const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin[1]},${origin[0]}&destinations=${destination[1]},${destination[0]}&mode=driving&key=${key}`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    if (data.status !== 'OK' || !data.rows || data.rows.length === 0) {
+      console.error('API Response:', data);
+      throw new Error('无法获取驾车时间');
+    }
+    const element = data.rows[0].elements[0];
+    if (element.status !== 'OK') {
+      throw new Error('无法获取驾车时间');
+    }
+    return {
+      duration: element.duration.value,
+      distance: element.distance.value
+    };
+  } catch (error) {
+    console.error('获取驾车时间时出错:', error);
+    console.error('API URL:', url);
+    throw error;
+  }
+}
+
+// 修改现有的getCoordinates和getDrivingTime函数
 async function getCoordinates(address) {
-  const key = 'KklG7KuZg9Akt5vhR0iMpjhwX3lyVIotTkXxywpFWyY1XQLnSq8pJQQJ99BDACYeBjFh5AQjAAAgAZMP2wiM';
+  const api = getCurrentApi();
+  if (api === 'google') {
+    return getCoordinatesGoogle(address);
+  } else {
+    return getCoordinatesAzure(address);
+  }
+}
+
+async function getDrivingTime(origin, destination) {
+  const api = getCurrentApi();
+  if (api === 'google') {
+    return getDrivingTimeGoogle(origin, destination);
+  } else {
+    return getDrivingTimeAzure(origin, destination);
+  }
+}
+
+// 重命名原有的Azure函数
+async function getCoordinatesAzure(address) {
+  const key = getApiKey();
   const url = `https://atlas.microsoft.com/search/address/json?api-version=1.0&subscription-key=${key}&query=${encodeURIComponent(address)}&limit=1`;
   try {
     const response = await fetch(url);
@@ -158,8 +246,8 @@ async function getCoordinates(address) {
   }
 }
 
-async function getDrivingTime(origin, destination) {
-  const key = 'KklG7KuZg9Akt5vhR0iMpjhwX3lyVIotTkXxywpFWyY1XQLnSq8pJQQJ99BDACYeBjFh5AQjAAAgAZMP2wiM';
+async function getDrivingTimeAzure(origin, destination) {
+  const key = getApiKey();
   const url = `https://atlas.microsoft.com/route/directions/json?api-version=1.0&subscription-key=${key}&query=${origin[1]},${origin[0]}:${destination[1]},${destination[0]}&travelMode=car&computeBestOrder=false`;
   try {
     const response = await fetch(url);
